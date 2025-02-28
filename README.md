@@ -1,7 +1,5 @@
-
 # Extend minion to Trend Cybertron Minions
 
-![Minions Logo](assets/demo-0.png)
 ![Minions Logo](assets/demo-1.png)
 ![Minions Logo](assets/demo-2.png)
 ![Minions Logo](assets/demo-3.png)
