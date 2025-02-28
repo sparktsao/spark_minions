@@ -1,7 +1,6 @@
 import streamlit as st
 from minions.minion import Minion
-from minions.minion_manager import MinionManager
-from minions.minions2 import Minions
+from minions.minions_ex import Minions
 from minions.clients.ollama import OllamaClient
 from minions.clients.openai import OpenAIClient
 from minions.clients.anthropic import AnthropicClient
@@ -149,13 +148,13 @@ def message_callback(role, message, is_final=True):
     # Map supervisor -> Remote, worker -> Local
     chat_role = "Remote" if role == "supervisor" else "Local"
 
-    if role == "supervisor":
+    if role == "General":
         chat_role = "Remote"
-        path = "assets/gru.jpg"
+        path = "assets/llama3.1.png"
         #path = GRU_GIF
     else:
-        chat_role = "Local"
-        path = "assets/minion.png"
+        chat_role = "Primus"
+        path = "assets/minion_resized.png"
         #path = MINION_GIF
 
    
@@ -273,7 +272,7 @@ def initialize_clients(local_model_name, remote_model_name, provider, protocol,
     st.session_state.api_key = api_key
     
     # For Minions we want asynchronous local chunk processing:
-    if protocol == "CybertronMinions" or protocol=="Minions":
+    if protocol == "CybertronMinions":
         use_async = True
         # For Minions, we use a fixed context size since it processes chunks
         minions_ctx = 4096
@@ -319,14 +318,9 @@ def initialize_clients(local_model_name, remote_model_name, provider, protocol,
         )
 
     if protocol == "CybertronMinions":
-        import minions.config as conf
-        mconf = conf.MinionConfig()
-        import minions.llm_client as llmclient
-        myllmclient = llmclient.LLMClient(st.session_state.local_client, st.session_state.remote_client)
-        st.session_state.method = MinionManager(mconf, myllmclient, callback=message_callback)
-        
-    else:
         st.session_state.method = Minions(st.session_state.local_client, st.session_state.remote_client, callback=message_callback)
+    else:
+        st.session_state.method = Minion(st.session_state.local_client, st.session_state.remote_client, callback=message_callback)
     
     return st.session_state.local_client, st.session_state.remote_client, st.session_state.method
 
@@ -478,7 +472,7 @@ with st.sidebar:
     st.subheader("Protocol")
     protocol = st.segmented_control(
         "Communication protocol",
-        options=["Minions", "CybertronMinions"],
+        options=["Minion", "CybertronMinions"],
         default="CybertronMinions"
     )
 
@@ -490,7 +484,7 @@ with st.sidebar:
 
     # Local model settings
     with local_col:
-        st.markdown("### Cybertron Model")
+        st.markdown("### Local Model")
         st.image("assets/minion_resized.png", use_container_width=True)
         local_model_options = {
             "llama3.2 (Recommended)": "llama3.2",
@@ -524,7 +518,7 @@ with st.sidebar:
 
     # Remote model settings
     with remote_col:
-        st.markdown("### General Model")
+        st.markdown("### Remote Model")
         st.image("assets/llama3.1.png", use_container_width=True)
         if selected_provider == "OpenAI":
             model_mapping = {
@@ -672,7 +666,7 @@ if user_query:
         st.stop()
 
     with st.status(f"Running {protocol} protocol...", expanded=True) as status:
-        if True:
+        try:
             # Initialize clients first (only once) or if protocol has changed
             if ('local_client' not in st.session_state or 
                 'remote_client' not in st.session_state or 
@@ -793,5 +787,5 @@ if user_query:
                     if "remote" in round_meta:
                         st.write(f"Remote messages: {len(round_meta['remote']['messages'])}")
 
-        #except Exception as e:
-        #    st.error(f"An error occurred: {str(e)}")
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
