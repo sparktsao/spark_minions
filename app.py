@@ -1,6 +1,7 @@
 import streamlit as st
 from minions.minion import Minion
-from minions.minions import Minions
+from minions.minion_manager import MinionManager
+from minions.minions2 import Minions
 from minions.clients.ollama import OllamaClient
 from minions.clients.openai import OpenAIClient
 from minions.clients.anthropic import AnthropicClient
@@ -61,10 +62,12 @@ class JobOutput(BaseModel):
     explanation: str | None
     citation: str | None
 
+import pymupdf
 def extract_text_from_pdf(pdf_bytes):
     """Extract text from a PDF file using PyMuPDF."""
     try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        #doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        doc  = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         text = ""
         for page in doc:
             text += page.get_text()
@@ -113,7 +116,7 @@ placeholder_messages = {}
 THINKING_GIF = "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExa2xhc3QzaHZyYWJ0M3czZXVjMGQ0YW50ZTBvcDdlNXVxNWhvZHdhOCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/3o7bu3XilJ5BOiSGic/giphy.gif"
 GRU_GIF = "https://media.giphy.com/media/ySMINwPzf50IM/giphy.gif?cid=790b7611vozglgf917p8ou0vjzydpgk9p8hpdwq9x95euttp&ep=v1_gifs_search&rid=giphy.gif&ct=g"
 MINION_GIF = "https://media.giphy.com/media/1MTLxzwvOnvmE/giphy.gif?cid=ecf05e47aulvh0ffnr7p49bk2c8cvtopnincdtg8wsz9hlx4&ep=v1_gifs_search&rid=giphy.gif&ct=g"
-MINION_VIDEO = "https://www.youtube.com/embed/65BzWiQTkII?autoplay=1&mute=1"
+MINION_VIDEO = "https://www.youtube.com/embed/JgdRgjgCrOc?si=6AcobGeBSHrtIg3w&autoplay=1&mute=1"
 
 def is_dark_mode():
     theme = st_theme()
@@ -270,7 +273,7 @@ def initialize_clients(local_model_name, remote_model_name, provider, protocol,
     st.session_state.api_key = api_key
     
     # For Minions we want asynchronous local chunk processing:
-    if protocol == "Minions":
+    if protocol == "CybertronMinions" or protocol=="Minions":
         use_async = True
         # For Minions, we use a fixed context size since it processes chunks
         minions_ctx = 4096
@@ -315,10 +318,15 @@ def initialize_clients(local_model_name, remote_model_name, provider, protocol,
             api_key=api_key
         )
 
-    if protocol == "Minions":
-        st.session_state.method = Minions(st.session_state.local_client, st.session_state.remote_client, callback=message_callback)
+    if protocol == "CybertronMinions":
+        import minions.config as conf
+        mconf = conf.MinionConfig()
+        import minions.llm_client as llmclient
+        myllmclient = llmclient.LLMClient(st.session_state.local_client, st.session_state.remote_client)
+        st.session_state.method = MinionManager(mconf, myllmclient, callback=message_callback)
+        
     else:
-        st.session_state.method = Minion(st.session_state.local_client, st.session_state.remote_client, callback=message_callback)
+        st.session_state.method = Minions(st.session_state.local_client, st.session_state.remote_client, callback=message_callback)
     
     return st.session_state.local_client, st.session_state.remote_client, st.session_state.method
 
@@ -470,8 +478,8 @@ with st.sidebar:
     st.subheader("Protocol")
     protocol = st.segmented_control(
         "Communication protocol",
-        options=["Minion", "Minions"],
-        default="Minion"
+        options=["Minions", "CybertronMinions"],
+        default="CybertronMinions"
     )
 
     # Model Settings
@@ -482,8 +490,8 @@ with st.sidebar:
 
     # Local model settings
     with local_col:
-        st.markdown("### Local Model")
-        st.image("assets/minion_resized.jpg", use_container_width=True)
+        st.markdown("### Cybertron Model")
+        st.image("assets/minion_resized.png", use_container_width=True)
         local_model_options = {
             "llama3.2 (Recommended)": "llama3.2",
             "llama3.1:8b (Recommended)": "llama3.1:8b",
@@ -516,8 +524,8 @@ with st.sidebar:
 
     # Remote model settings
     with remote_col:
-        st.markdown("### Remote Model")
-        st.image("assets/gru_resized.jpg", use_container_width=True)
+        st.markdown("### General Model")
+        st.image("assets/llama3.1.png", use_container_width=True)
         if selected_provider == "OpenAI":
             model_mapping = {
                 "gpt-4o (Recommended)": "gpt-4o",
@@ -664,7 +672,7 @@ if user_query:
         st.stop()
 
     with st.status(f"Running {protocol} protocol...", expanded=True) as status:
-        try:
+        if True:
             # Initialize clients first (only once) or if protocol has changed
             if ('local_client' not in st.session_state or 
                 'remote_client' not in st.session_state or 
@@ -785,5 +793,5 @@ if user_query:
                     if "remote" in round_meta:
                         st.write(f"Remote messages: {len(round_meta['remote']['messages'])}")
 
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
+        #except Exception as e:
+        #    st.error(f"An error occurred: {str(e)}")
