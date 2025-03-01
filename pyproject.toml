@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "spark-minions"
+version = "0.1.0"
+description = ""
+authors = ["sparktsao <linhots.tsao@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+streamlit = "1.42.2"
+tiktoken = "0.9.0"
+pydantic = "2.10.6"
+openai = "1.64.0"
+anthropic = "0.47.2"
+together = "1.4.1"
+fitz = "0.0.1.dev2"
+frontend = "0.0.3"
+tools = "0.1.9"
+streamlit-theme = "0.58.0"
+st-theme = "1.2.3"
+ollama = "0.4.7"
+pymupdf = "^1.25.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -192,7 +192,7 @@ class Minions:
         # call exec_globsl (filter_fnf)
         return output, code
 
-    def _get_advice(self, task, doc_metadata):
+    def _step_1_get_advice(self, task, doc_metadata):
 
         supervisor_messages = [
             {
@@ -211,7 +211,7 @@ class Minions:
         return supervisor_messages, advice_response, usage
 
 
-    def _plan(self,  round_idx,supervisor_messages, num_tasks_per_round, num_samples_per_task, feedback, scratchpad):
+    def _step_2_plan_decompose_prompt(self,  round_idx,supervisor_messages, num_tasks_per_round, num_samples_per_task, feedback, scratchpad):
 
         decompose_message_kwargs = dict(
                 num_samples=self.num_samples,
@@ -240,6 +240,7 @@ class Minions:
         }
 
         print(decompose_message["content"])
+
         if round_idx == 0:
             supervisor_messages.append(decompose_message)
         else:
@@ -256,7 +257,12 @@ class Minions:
             supervisor_messages = supervisor_messages[:2] + [decompose_message]
         return supervisor_messages
     
-    def _code(self, supervisor_messages, context, last_jobs, attempt_idx, starting_globals):
+    def _step_3_prompt_generate_code_n_execute(self, 
+                                        supervisor_messages, 
+                                        context, 
+                                        last_jobs, 
+                                        attempt_idx, 
+                                        starting_globals):
         
         # Return : job_manifests
         # Return : supervisor_messages
@@ -294,13 +300,10 @@ class Minions:
                 }
             )
             #continue
-            return None, supervisor_messages, usage
-            # 
+            return None, None, supervisor_messages, usage
+            # R1
             # PROMPT FAIL, need to retry
             #
-            
-
-        
 
         fn_kwargs = {
             "context": context,
@@ -353,15 +356,15 @@ class Minions:
                     }
                 )
                 #continue
-                return None, supervisor_messages, usage
-                # 
+                return None, code_block, supervisor_messages, usage
+                # #2
                 # CALL LLM 1 Fail, too many jobs
                 #
             
             print(f"Created {len(job_manifests)} job manifests ({len(chunk_ids)} chunks, apriori requested {self.num_samples} samples per chunk, {len(task_ids)} tasks)")
             #break
-            return job_manifests, supervisor_messages, usage
-            # 
+            return job_manifests, code_block, supervisor_messages, usage
+            # R3
             # CALL LLM 1 Success
             #
             
@@ -378,10 +381,15 @@ class Minions:
             )
             # 
             # CALL LLM 1 Fail, 
-            #
-            return None, supervisor_messages, usage
+            # R4
+            return None, None, supervisor_messages, usage
 
-    def _call_worker(self, job_manifests):
+    def _step_4_dispatch_job_2_workers(self, job_manifests):
+        # 1. turn job_manifests into worker_messages
+        # 2. local_client.chat ( all workder_message )
+        # 3. turn zip (worker_chats, worker_response, job_manifests, done_reasons) into jobs
+        # 4. return jobs
+
         worker_chats = []
         # output is a list of task_dicts
         # print totla number of job_manfiests
@@ -408,7 +416,6 @@ class Minions:
             worker_chats,
         )
         
-
         def extract_job_output(response: str) -> JobOutput:
             output = JobOutput.model_validate_json(response)
             return output
@@ -433,11 +440,12 @@ class Minions:
             )     
         return jobs, usage       
     
-    def _execute_aggregate(self, jobs, starting_globals, fn_kwargs ):
+    def _step_5_execute_aggregate(self, code_block, jobs, starting_globals, fn_kwargs ):
         try:
             # Model generated Filter + Aggregation code
             for job in jobs:
                 print(job.output.answer)
+
             aggregated_str, code_block = self._execute_code(
                 code_block,
                 starting_globals=starting_globals,
@@ -508,7 +516,7 @@ class Minions:
                 # Separate tasks with a short delimiter
                 aggregated_str += "\n-----------------------\n\n"
 
-        return aggregated_str
+        return code_block, aggregated_str
 
     def __call__(
         self,
@@ -539,7 +547,7 @@ class Minions:
 
         # 1. [REMOTE] ADVICE --- Read the query with big model and provide advice
         # ---------- START ----------
-        supervisor_messages, advice_response, usage = self._get_advice(task, doc_metadata)
+        supervisor_messages, advice_response, usage = self._step_1_get_advice(task, doc_metadata)
         
         remote_usage += usage
 
@@ -567,7 +575,12 @@ class Minions:
 
         for round_idx in range(max_rounds):
             print(f"Round {round_idx + 1}/{max_rounds}")
-            supervisor_messages = self._plan(round_idx, supervisor_messages, num_tasks_per_round, num_samples_per_task, feedback, scratchpad)
+            supervisor_messages = self._step_2_plan_decompose_prompt(round_idx, 
+                                                              supervisor_messages, 
+                                                              num_tasks_per_round, 
+                                                              num_samples_per_task, 
+                                                              feedback, 
+                                                              scratchpad)
 
             # 2. [REMOTE] PREPARE TASKS --- Prompt the supervisor to write code
             # ---------- START ----------
@@ -577,16 +590,21 @@ class Minions:
                 if self.callback:
                     self.callback("supervisor", None, is_final=False)
 
-                job_manifests, supervisor_messages, usage = self._code(supervisor_messages, context, last_jobs, attempt_idx, starting_globals)
+                job_manifests, code_block, supervisor_messages, usage = self._step_3_prompt_generate_code_n_execute(supervisor_messages, 
+                                                                                                 context, 
+                                                                                                 last_jobs, 
+                                                                                                 attempt_idx, 
+                                                                                                 starting_globals)
                 remote_usage += usage
                 if job_manifests is None:
                     continue
                 else:
-                    break
+                    # Success generated job_manifests
+                    break # break the for code attemp
             else:
                 # if we have exhausted all attempts, break
                 print(f"Exhausted all attempts to execute code. Breaking out of round loop.")
-                break
+                break # break the round
             # --------- END ---------
 
             # 3. [REMOTE] LOCAL WORKERS EXECUTE TASKS
@@ -596,9 +614,8 @@ class Minions:
             # print totla number of job_manfiests
             print(f"Total number of job_manifests: {len(job_manifests)}")
             
-            jobs, usage = self._call_worker(job_manifests)
+            jobs, usage = self._step_4_dispatch_job_2_workers(job_manifests)
             local_usage += usage
-
 
             fn_kwargs = {
                 "jobs": jobs,
@@ -606,8 +623,7 @@ class Minions:
             if self.callback:
                 self.callback("worker", jobs, is_final=True)
                 
-            
-            aggregated_str = self._execute_aggregate(jobs, starting_globals, fn_kwargs )
+            aggregated_str, code_block= self._step_5_execute_aggregate(code_block, jobs, starting_globals, fn_kwargs )
 
             if round_idx == max_rounds - 1:
                 # Final round - use the final prompt directly
@@ -632,8 +648,7 @@ class Minions:
                             scratchpad=scratchpad if scratchpad else "No previous progress.",
                         ),
                     }
-                )
-                
+                )                
                 step_by_step_response, usage = self.remote_client.chat(
                     supervisor_messages,
                 )
@@ -641,10 +656,11 @@ class Minions:
                 if self.callback:
                     self.callback("supervisor", step_by_step_response[0])
                 
+                
+                
                 supervisor_messages.append(
                     {"role": "assistant", "content": step_by_step_response[0]}
-                )
-                
+                )                
                 # Second step: Get structured output
                 supervisor_messages.append(
                     {
@@ -659,6 +675,7 @@ class Minions:
                 try:
                     if self.callback:
                         self.callback("supervisor", None, is_final=False)
+                    
                     # Request JSON response from remote client
                     synthesized_response, usage = self.remote_client.chat(
                         supervisor_messages,
@@ -667,6 +684,7 @@ class Minions:
                     
                     # Parse and validate JSON response
                     response_text = synthesized_response[0]
+                    
                     print(f"Attempt {attempt_idx + 1}/{max_attempts} response: {response_text}")
                     
                     obj = json.loads(response_text)
