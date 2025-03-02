@@ -384,6 +384,7 @@ def run_protocol(task, context, doc_metadata, status, protocol):
     return output, setup_time, execution_time
 
 def validate_openai_key(api_key):
+    print("validate_openai_key")
     try:
         client = OpenAIClient(
             model_name="gpt-4o-mini",
@@ -391,7 +392,7 @@ def validate_openai_key(api_key):
             temperature=0.0,
             max_tokens=1
         )
-        messages = [{"role": "user", "content": "Say yes"}]
+        messages = [{"role": "user", "content": "Say OpenAI!"}]
         client.chat(messages)
         return True, ""
     except Exception as e:
@@ -586,7 +587,7 @@ text_input = st.text_area(
 
 uploaded_files = st.file_uploader(
     "Or upload PDF / TXT (Not more than a 100 pages total!)",
-    type=['txt', 'pdf'],
+    type=['txt', 'pdf', 'json'],
     accept_multiple_files=True
 )
 

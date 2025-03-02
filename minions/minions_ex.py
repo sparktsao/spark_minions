@@ -29,6 +29,50 @@ from minions.prompts.minions import (
 
 
 def chunk_by_section(doc: str, max_chunk_size: int = 5000, overlap: int = 0) -> List[str]:
+
+    print("call chunk_by_section!!!!")
+    try:
+        print("start try:")
+        if not doc:
+            raise ValueError("Input document is empty or None")
+
+        import json
+        docarr = doc.split("\n")
+        docarr_new = []
+        for i, line in enumerate(docarr):
+            if not line.strip().startswith("{"):
+                continue
+            break
+        docarr_new = docarr[i:]
+        doc = "\n".join(docarr_new)
+        #print("Raw JSON Input:", doc)  # Print the first 100 chars to check format
+        j1 = json.loads(doc)  # Attempt to parse JSON
+        sections = []
+        meta = []
+        ar = []
+
+        for key in j1:
+
+            if type(j1[key] )is list:
+                ar.extend(j1[key])
+            else:
+                meta.append(j1[key])
+
+        for i, issue in enumerate(ar):
+            sections.append(str(meta) + str(issue))
+            if i > 100:
+                break
+
+        print("Chunked data using JSON into", 2)
+        return sections
+
+    except json.JSONDecodeError as e:
+        print("!!JSON parsing failed:", e)
+        print("Possible issues: Empty input, malformed JSON, or encoding problems.")
+    except Exception as e:
+        print("Unexpected error:", e)
+        pass
+
     sections = []
     start = 0
     while start < len(doc):
@@ -211,7 +255,13 @@ class Minions:
         return supervisor_messages, advice_response, usage
 
 
-    def _step_2_plan_decompose_prompt(self,  round_idx,supervisor_messages, num_tasks_per_round, num_samples_per_task, feedback, scratchpad):
+    def _step_2_plan_decompose_prompt(self,  
+                                      round_idx,
+                                      supervisor_messages, 
+                                      num_tasks_per_round, 
+                                      num_samples_per_task, 
+                                      feedback, 
+                                      scratchpad):
 
         decompose_message_kwargs = dict(
                 num_samples=self.num_samples,
@@ -239,7 +289,7 @@ class Minions:
             ),
         }
 
-        print(decompose_message["content"])
+        #print(decompose_message["content"])
 
         if round_idx == 0:
             supervisor_messages.append(decompose_message)
@@ -271,21 +321,21 @@ class Minions:
         # 
         # CALL LLM 1
         #
-        task_response, usage = self.remote_client.chat(
+        task_response_with_code, usage = self.remote_client.chat(
                     messages=supervisor_messages,
                 )
         
-        task_response = task_response[0]
+        # SPARK, why just take [0]?
+        task_response_with_code = task_response_with_code[0]
         supervisor_messages.append(
-            {"role": "assistant", "content": task_response},
+            {"role": "assistant", "content": task_response_with_code},
         )
         if self.callback:
             self.callback("supervisor", supervisor_messages[-1], is_final=True)
 
-
         code_block_match = re.search(
             r"```(?:python)?\s*(.*?)```",
-            task_response,
+            task_response_with_code,
             re.DOTALL,
         )
 
@@ -443,8 +493,10 @@ class Minions:
     def _step_5_execute_aggregate(self, code_block, jobs, starting_globals, fn_kwargs ):
         try:
             # Model generated Filter + Aggregation code
-            for job in jobs:
-                print(job.output.answer)
+            for i, job in enumerate(jobs):
+                print("\tjob:", i, "\033[33mA", job.output.answer, "\033[0m")
+                
+
 
             aggregated_str, code_block = self._execute_code(
                 code_block,
@@ -573,6 +625,7 @@ class Minions:
             "Job": Job,
         }
 
+        # LOOP 1
         for round_idx in range(max_rounds):
             print(f"Round {round_idx + 1}/{max_rounds}")
             supervisor_messages = self._step_2_plan_decompose_prompt(round_idx, 
@@ -584,8 +637,9 @@ class Minions:
 
             # 2. [REMOTE] PREPARE TASKS --- Prompt the supervisor to write code
             # ---------- START ----------
+            # LOOP 2
             for attempt_idx in range(self.max_code_attempts):
-                print(f"Attempt {attempt_idx + 1}/{self.max_code_attempts}")
+                print(f"Attempt gen-code, {attempt_idx + 1}/{self.max_code_attempts}")
 
                 if self.callback:
                     self.callback("supervisor", None, is_final=False)
@@ -612,10 +666,10 @@ class Minions:
             worker_chats = []
             # output is a list of task_dicts
             # print totla number of job_manfiests
-            print(f"Total number of job_manifests: {len(job_manifests)}")
-            
+            print(f"Total number of job_manifests: {len(job_manifests)}")            
             jobs, usage = self._step_4_dispatch_job_2_workers(job_manifests)
             local_usage += usage
+
 
             fn_kwargs = {
                 "jobs": jobs,
@@ -670,7 +724,7 @@ class Minions:
                 )
 
             # Get the structured output and validate JSON response
-            max_attempts = 5
+            max_attempts = 6
             for attempt_idx in range(max_attempts):
                 try:
                     if self.callback:
@@ -685,12 +739,13 @@ class Minions:
                     # Parse and validate JSON response
                     response_text = synthesized_response[0]
                     
-                    print(f"Attempt {attempt_idx + 1}/{max_attempts} response: {response_text}")
+                    print(f"Attempt synthesize result JSON with decision: {attempt_idx + 1}/{max_attempts} \nresponse: \033[92m{response_text}\033[0m")
                     
                     obj = json.loads(response_text)
                     if not isinstance(obj, dict) or "decision" not in obj:
                         raise ValueError("Response missing required 'decision' field")
                         
+                    # success case 
                     # Valid JSON with decision field found
                     break
                     
@@ -723,10 +778,11 @@ class Minions:
 
             if obj["decision"] != "request_additional_info":
                 final_answer = obj.get("answer", None)
-                break  # answer was found, so we are done!
-            else:
-                feedback = obj.get("explanation", None)
-                scratchpad = obj.get("scratchpad", None)
+                if final_answer:
+                    break  # answer was found, so we are done!
+            
+            feedback = obj.get("explanation", None)
+            scratchpad = obj.get("scratchpad", None)
 
         if final_answer == None:
             print(f"Exhausted all rounds without finding a final answer. Returning the last synthesized response.")
@@ -735,6 +791,117 @@ class Minions:
         return {
             "final_answer": final_answer,
             "meta": meta,
+            "local_usage": local_usage,
+            "remote_usage": remote_usage,
+        }
+
+
+
+    def callsingle(
+        self,
+        task: str,
+        doc_metadata: str,
+        context: List[str],
+        max_rounds=None,
+        num_tasks_per_round=3,
+        num_samples_per_task=1,
+    ):
+        """Run the minions protocol in a single pass without retries or loops."""
+
+        if self.callback:
+            self.callback("supervisor", "Hello I am the single calll", is_final=True)
+
+
+        # Initialize usage tracking
+        remote_usage = Usage()
+        local_usage = Usage()
+
+        # Step 1: Get advice from the supervisor
+        supervisor_messages, advice_response, usage = self._step_1_get_advice(task, doc_metadata)
+        remote_usage += usage
+
+        supervisor_messages.append(
+            {"role": "assistant", "content": advice_response[0]},
+        )
+        if self.callback:
+            self.callback("supervisor", supervisor_messages[-1], is_final=True)
+
+        # Prepare the execution environment
+        starting_globals = {
+            **USEFUL_IMPORTS,
+            "chunk_by_section": chunk_by_section,
+            "JobManifest": JobManifest,
+            "JobOutput": JobOutput,
+            "Job": Job,
+        }
+
+        # Step 2: Plan and decompose the task
+        supervisor_messages = self._step_2_plan_decompose_prompt(
+            round_idx=0, 
+            supervisor_messages=supervisor_messages, 
+            num_tasks_per_round=num_tasks_per_round, 
+            num_samples_per_task=num_samples_per_task, 
+            feedback=None, 
+            scratchpad=""
+        )
+
+        # Step 3: Prompt to generate code and execute
+        job_manifests, code_block, supervisor_messages, usage = self._step_3_prompt_generate_code_n_execute(
+            supervisor_messages, 
+            context, 
+            last_jobs=None, 
+            attempt_idx=0, 
+            starting_globals=starting_globals
+        )
+        remote_usage += usage
+
+        if job_manifests is None:
+            return {"final_answer": "No jobs generated.", "meta": [], "local_usage": local_usage, "remote_usage": remote_usage}
+
+        # Step 4: Dispatch jobs to workers
+        jobs, usage = self._step_4_dispatch_job_2_workers(job_manifests)
+        local_usage += usage
+
+        fn_kwargs = {"jobs": jobs}
+        if self.callback:
+            self.callback("worker", jobs, is_final=True)
+
+        # Step 5: Aggregate results
+        aggregated_str, code_block = self._step_5_execute_aggregate(code_block, jobs, starting_globals, fn_kwargs)
+
+        # Final synthesis
+        supervisor_messages.append(
+            {
+                "role": "user",
+                "content": self.synthesis_final_prompt.format(
+                    extractions=aggregated_str,
+                    question=task,
+                    scratchpad="No previous progress.",
+                ),
+            }
+        )
+
+        # Get final structured response
+        synthesized_response, usage = self.remote_client.chat(
+            supervisor_messages,
+            response_format={"type": "json_object"}
+        )
+        remote_usage += usage
+
+        response_text = synthesized_response[0]
+        try:
+            obj = json.loads(response_text)
+            final_answer = obj.get("answer", "No answer found.")
+        except json.JSONDecodeError:
+            final_answer = "Invalid response from remote client."
+
+        supervisor_messages.append({"role": "assistant", "content": response_text})
+        if self.callback:
+            self.callback("supervisor", supervisor_messages[-1], is_final=True)
+
+        return {
+            "final_answer": final_answer,
+            "meta": [{"local": {"jobs": [job.model_dump() for job in jobs]}}, {"remote": {"messages": supervisor_messages}}],
             "local_usage": local_usage,
             "remote_usage": remote_usage,
         }
