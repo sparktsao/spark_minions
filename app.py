@@ -450,25 +450,31 @@ with st.sidebar:
     api_key = user_key if user_key else env_key
 
     if api_key:
-        if selected_provider == "OpenAI":
-            is_valid, msg = validate_openai_key(api_key)
-        elif selected_provider == "Anthropic":
-            is_valid, msg = validate_anthropic_key(api_key)
-        elif selected_provider == "Together":
-            is_valid, msg = validate_together_key(api_key)
-        else:
-            raise ValueError(f"Invalid provider: {selected_provider}")
+        if not "provider_key" in st.session_state:
 
-        if is_valid:
-            st.success("**✓ Valid API key.** You're good to go!")
-            provider_key = api_key
+            if selected_provider == "OpenAI":
+                is_valid, msg = validate_openai_key(api_key)
+            elif selected_provider == "Anthropic":
+                is_valid, msg = validate_anthropic_key(api_key)
+            elif selected_provider == "Together":
+                is_valid, msg = validate_together_key(api_key)
+            else:
+                raise ValueError(f"Invalid provider: {selected_provider}")
+
+            if is_valid:
+                st.success("**✓ Valid API key.** You're good to go!")
+                provider_key = api_key
+            else:
+                st.error(f"**✗ Invalid API key.** {msg}")
+                provider_key = None
+            st.session_state.provider_key = provider_key
         else:
-            st.error(f"**✗ Invalid API key.** {msg}")
-            provider_key = None
+            
+            provider_key = st.session_state.provider_key
     else:
         st.error(f"**✗ Missing API key.** Input your key above or set the environment variable with `export {PROVIDER_TO_ENV_VAR_KEY[selected_provider]}=<your-api-key>`")
         provider_key = None
-
+    
     # Protocol selection
     st.subheader("Protocol")
     protocol = st.segmented_control(
@@ -667,7 +673,7 @@ if user_query:
         st.stop()
 
     with st.status(f"Running {protocol} protocol...", expanded=True) as status:
-        try:
+        if True:
             # Initialize clients first (only once) or if protocol has changed
             if ('local_client' not in st.session_state or 
                 'remote_client' not in st.session_state or 
@@ -787,6 +793,7 @@ if user_query:
                         st.write(f"Local jobs: {len(round_meta['local']['jobs'])}")
                     if "remote" in round_meta:
                         st.write(f"Remote messages: {len(round_meta['remote']['messages'])}")
-
+        try:
+            a = 1 
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")

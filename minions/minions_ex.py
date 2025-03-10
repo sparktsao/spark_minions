@@ -30,9 +30,7 @@ from minions.prompts.minions import (
 
 def chunk_by_section(doc: str, max_chunk_size: int = 5000, overlap: int = 0) -> List[str]:
 
-    print("call chunk_by_section!!!!")
     try:
-        print("start try:")
         if not doc:
             raise ValueError("Input document is empty or None")
 
@@ -317,6 +315,8 @@ class Minions:
         # Return : job_manifests
         # Return : supervisor_messages
         # Return : usage
+
+        print("\033[91m[STEP3]:\033[0m promp/code/execute code/generate joblist")
         
         # 
         # CALL LLM 1
@@ -443,7 +443,7 @@ class Minions:
         worker_chats = []
         # output is a list of task_dicts
         # print totla number of job_manfiests
-        print(f"Total number of job_manifests: {len(job_manifests)}")
+        print(f"\033[91m[STEP4]:\033[0m Total number of job_manifests: {len(job_manifests)}")
         
         for job_manifest in job_manifests:
             # Each worker is going to see a unique task+chunk combo
@@ -491,13 +491,13 @@ class Minions:
         return jobs, usage       
     
     def _step_5_execute_aggregate(self, code_block, jobs, starting_globals, fn_kwargs ):
+        
+        print("\033[91m[STEP5]:\033[0m execute 'transform output code' on local model outpupt.")
         try:
             # Model generated Filter + Aggregation code
             for i, job in enumerate(jobs):
                 print("\tjob:", i, "\033[33mA", job.output.answer, "\033[0m")
                 
-
-
             aggregated_str, code_block = self._execute_code(
                 code_block,
                 starting_globals=starting_globals,
@@ -627,7 +627,7 @@ class Minions:
 
         # LOOP 1
         for round_idx in range(max_rounds):
-            print(f"Round {round_idx + 1}/{max_rounds}")
+            print(f"\033[91m[STEP1]:\033[0m Round {round_idx + 1}/{max_rounds}")
             supervisor_messages = self._step_2_plan_decompose_prompt(round_idx, 
                                                               supervisor_messages, 
                                                               num_tasks_per_round, 
@@ -639,7 +639,7 @@ class Minions:
             # ---------- START ----------
             # LOOP 2
             for attempt_idx in range(self.max_code_attempts):
-                print(f"Attempt gen-code, {attempt_idx + 1}/{self.max_code_attempts}")
+                print(f"\033[91m[STEP2]:\033[0m Attempt Code-Gen, {attempt_idx + 1}/{self.max_code_attempts}")
 
                 if self.callback:
                     self.callback("supervisor", None, is_final=False)
@@ -658,7 +658,7 @@ class Minions:
             else:
                 # if we have exhausted all attempts, break
                 print(f"Exhausted all attempts to execute code. Breaking out of round loop.")
-                break # break the round
+                continue # break the round
             # --------- END ---------
 
             # 3. [REMOTE] LOCAL WORKERS EXECUTE TASKS
@@ -670,15 +670,19 @@ class Minions:
             jobs, usage = self._step_4_dispatch_job_2_workers(job_manifests)
             local_usage += usage
 
-
             fn_kwargs = {
                 "jobs": jobs,
             }
             if self.callback:
                 self.callback("worker", jobs, is_final=True)
-                
+
             aggregated_str, code_block= self._step_5_execute_aggregate(code_block, jobs, starting_globals, fn_kwargs )
 
+            #
+            # synthesis_cot_prompt
+            # synthesis_json_prompt
+            # synthesis_final_prompt
+            # 
             if round_idx == max_rounds - 1:
                 # Final round - use the final prompt directly
                 supervisor_messages.append(
@@ -692,7 +696,9 @@ class Minions:
                     }
                 )
             else:
+                # ---------------------------------------
                 # First step: Think through the synthesis
+                # ---------------------------------------
                 supervisor_messages.append(
                     {
                         "role": "user",
@@ -709,13 +715,15 @@ class Minions:
                 remote_usage += usage
                 if self.callback:
                     self.callback("supervisor", step_by_step_response[0])
-                
-                
-                
+
+                print(f"\033[91m[STEP6]:\033[0m synthesis_cot_prompt")
+                    
                 supervisor_messages.append(
                     {"role": "assistant", "content": step_by_step_response[0]}
                 )                
+                # ---------------------------------------
                 # Second step: Get structured output
+                # ---------------------------------------
                 supervisor_messages.append(
                     {
                         "role": "user",
@@ -739,7 +747,7 @@ class Minions:
                     # Parse and validate JSON response
                     response_text = synthesized_response[0]
                     
-                    print(f"Attempt synthesize result JSON with decision: {attempt_idx + 1}/{max_attempts} \nresponse: \033[92m{response_text}\033[0m")
+                    print(f"\033[91m[STEP7]:\033[0m Attempt synthesize result JSON with decision: {attempt_idx + 1}/{max_attempts} \nresponse: \033[92m{response_text}\033[0m")
                     
                     obj = json.loads(response_text)
                     if not isinstance(obj, dict) or "decision" not in obj:
@@ -794,8 +802,6 @@ class Minions:
             "local_usage": local_usage,
             "remote_usage": remote_usage,
         }
-
-
 
     def callsingle(
         self,
